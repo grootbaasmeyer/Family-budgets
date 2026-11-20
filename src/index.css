@@ -59,3 +59,18 @@ tr.editing td { background: var(--soft); }
 .barcell { width: 25%; min-width: 80px; }
 .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
 .fill { height: 100%; background: var(--accent); } .fill.over { background: var(--bad); }
+.picker { position: relative; display: grid; }
+.picker input { padding-right: 28px; width: 100%; }
+.picker .caret { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; font-size: .8rem; }
+.picker-list { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; min-width: 200px; max-height: 260px; overflow-y: auto;
+  margin: 0; padding: 4px; list-style: none; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.14); }
+.picker-list li { padding: 8px 10px; border-radius: 6px; cursor: pointer; color: var(--ink); font-size: .92rem; display: flex; justify-content: space-between; gap: 8px; }
+.picker-list li.hi { background: var(--soft); }
+.picker-list li.sel { font-weight: 600; }
+.picker-list li.empty { cursor: default; }
+.picker-list .tick { color: var(--accent); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 8px; }
+.filters .search { flex: 1 1 240px; }
+.filters select { flex: 0 1 200px; }
+button.chip { border: 1px solid transparent; color: var(--ink); font: inherit; font-size: .85rem; padding: 4px 10px; }
+button.chip.on { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
