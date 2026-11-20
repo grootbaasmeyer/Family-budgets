@@ -10,6 +10,8 @@ One web app with four budgets: **JP snr (Family)**, **Madine**, **Miané** and *
 
 Stack: Vite + React + TypeScript, Supabase (auth + Postgres), hosted on Vercel.
 
+Live site: deployed from `main` on Vercel (project `family-budgets`).
+
 ## Setup
 
 1. In the Supabase project, open **SQL editor** and run `supabase/schema.sql`.
