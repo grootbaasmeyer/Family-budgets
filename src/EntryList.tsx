@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { supabase, money, today, type Entry, type Kind, type Section } from './supabase'
 import CategoryPicker, { type Opt } from './CategoryPicker'
+import MonthNav, { monthName } from './MonthNav'
 
 export interface ListConfig {
   title: string
@@ -29,9 +30,13 @@ interface Props {
   setMonth: (m: string) => void
   reload: () => Promise<void>
   planOpts?: Opt[]           // categories from the monthly budget, used for daily spending
+  planFrom?: string | null   // monthly budget: which month's lines are shown (may be an earlier month)
+  onCopyPlan?: () => Promise<void>
 }
 
-export default function EntryList({ budgetId, section, config, entries, month, setMonth, reload, planOpts }: Props) {
+export default function EntryList({ budgetId, section, config, entries, month, setMonth, reload, planOpts, planFrom, onCopyPlan }: Props) {
+  const isPlan = section === 'plan'
+  const inherited = isPlan && planFrom !== month
   const firstKind = config.kinds?.[0] ?? null
   const firstOpt = planOpts?.[0]
   const blank = { kind: firstKind as Kind, grp: firstOpt?.group ?? (config.grouped ? DEFAULT_GROUPS[0] : ''), category: firstOpt?.name ?? (config.categories[firstKind ?? '_'] ?? [])[0] ?? 'Other', description: '', amount: '', entry_date: today() }
@@ -60,7 +65,7 @@ export default function EntryList({ budgetId, section, config, entries, month, s
     return names.map(n => ({ group: '', name: n }))
   }, [entries])
 
-  const inPeriod = useMemo(() => config.monthFilter ? entries.filter(e => e.entry_date.startsWith(month)) : entries, [entries, month, config.monthFilter])
+  const inPeriod = useMemo(() => config.monthFilter && !isPlan ? entries.filter(e => e.entry_date.startsWith(month)) : entries, [entries, month, config.monthFilter, isPlan])
   const periodCats = useMemo(() => {
     const m = new Map<string, string>(); inPeriod.forEach(e => m.set(k(e.grp ?? '', e.category), lbl(e.grp ?? '', e.category)))
     return [...m].sort((a, b) => a[1].localeCompare(b[1]))
@@ -81,7 +86,7 @@ export default function EntryList({ budgetId, section, config, entries, month, s
     if (!form.category.trim()) { setErr('Choose a category'); return }
     setBusy(true); setErr('')
     const grp = config.grouped && form.kind !== 'expense' ? '' : form.grp
-    const row = { budget_id: budgetId, section, kind: form.kind, grp, category: form.category, description: form.description.trim(), amount, entry_date: form.entry_date || today() }
+    const row = { budget_id: budgetId, section, kind: form.kind, grp, category: form.category, description: form.description.trim(), amount, entry_date: isPlan ? `${month}-01` : (form.entry_date || today()) }
     const { error } = editing
       ? await supabase.from('entries').update(row).eq('id', editing)
       : await supabase.from('entries').insert(row)
@@ -136,10 +141,17 @@ export default function EntryList({ budgetId, section, config, entries, month, s
     <div>
       <div className="row between">
         <div><h2>{config.title}</h2><p className="muted small">{config.hint}</p></div>
-        {config.monthFilter && <label className="inline">Month <input type="month" value={month} onChange={e => setMonth(e.target.value)} /></label>}
+        {config.monthFilter && <MonthNav month={month} setMonth={setMonth} />}
       </div>
 
-      <form className="card entry-form" onSubmit={save}>
+      {inherited && (
+        <div className="banner">
+          <span>{planFrom ? <>{monthName(month)} has no budget of its own yet. Showing <b>{monthName(planFrom)}</b>'s budget.</> : <>No budget for {monthName(month)} yet. Add lines below to start one.</>}</span>
+          {planFrom && <button type="button" onClick={async () => { setBusy(true); await onCopyPlan?.(); setBusy(false) }} disabled={busy}>Start {monthName(month)} budget from {monthName(planFrom)}</button>}
+        </div>
+      )}
+
+      {!(inherited && planFrom) && <form className="card entry-form" onSubmit={save}>
         {config.kinds && (
           <label>Type
             <select value={form.kind ?? ''} onChange={e => { const kd = e.target.value as Kind; setForm({ ...form, kind: kd, category: (config.categories[kd ?? '_'] ?? [])[0] ?? 'Other' }) }}>
@@ -165,7 +177,7 @@ export default function EntryList({ budgetId, section, config, entries, month, s
           {editing && <button type="button" className="ghost" onClick={() => { setEditing(null); setForm(blank) }}>Cancel</button>}
         </div>
         {err && <p className="error full">{err}</p>}
-      </form>
+      </form>}
 
       {inPeriod.length > 0 && (
         <div className="filters">
@@ -208,7 +220,7 @@ export default function EntryList({ budgetId, section, config, entries, month, s
                 {config.kinds && <td>{KIND_LABEL[e.kind ?? '']}</td>}
                 <td>{e.category}{!config.grouped && e.grp ? <span className="muted small-inline"> · {e.grp}</span> : null}</td><td>{e.description}</td>
                 <td className={`num ${e.kind === 'expense' || e.kind === 'withdrawal' ? 'neg' : ''}`}>{money(e.amount)}</td>
-                <td className="nowrap right"><button className="link" onClick={() => edit(e)}>Edit</button><button className="link danger" onClick={() => remove(e.id)}>Delete</button></td>
+                <td className="nowrap right">{!(inherited && planFrom) && <><button className="link" onClick={() => edit(e)}>Edit</button><button className="link danger" onClick={() => remove(e.id)}>Delete</button></>}</td>
               </tr>
             ) })())}</tbody>
           </table>

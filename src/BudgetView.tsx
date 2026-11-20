@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, money, thisMonth, type Budget, type Entry, type Section } from './supabase'
 import EntryList, { DEFAULT_GROUPS, type ListConfig } from './EntryList'
 import type { Opt } from './CategoryPicker'
+import MonthNav, { monthName } from './MonthNav'
 
 const EXPENSE_CATS = ['Groceries', 'Housing', 'Transport', 'Fuel', 'Utilities', 'Insurance', 'Medical', 'School', 'Entertainment', 'Eating out', 'Clothing', 'Subscriptions', 'Debt', 'Gifts', 'Other']
 const INCOME_CATS = ['Salary', 'Business', 'Interest', 'Other income']
@@ -29,7 +30,7 @@ const KID_TABS: Tab[] = [
 
 function configFor(section: Section, kid: boolean): ListConfig {
   switch (section) {
-    case 'plan': return { title: 'Monthly budget', hint: 'Your planned income and expenses for a normal month.', kinds: ['expense', 'income'], categories: { expense: EXPENSE_CATS, income: INCOME_CATS }, showDate: false, monthFilter: false, grouped: true }
+    case 'plan': return { title: 'Monthly budget', hint: 'Planned income and expenses for the month. Each month can have its own budget.', kinds: ['expense', 'income'], categories: { expense: EXPENSE_CATS, income: INCOME_CATS }, showDate: false, monthFilter: true, grouped: true }
     case 'daily': return { title: 'Daily spending', hint: 'Log what you actually spend. It is compared with the monthly budget.', categories: { _: EXPENSE_CATS }, showDate: true, monthFilter: true }
     case 'asset': return { title: 'Assets', hint: 'What you own and its current value.', categories: { _: ASSET_CATS }, showDate: true, monthFilter: false, amountLabel: 'Value', dateLabel: 'Valued on' }
     case 'savings': return kid
@@ -58,14 +59,21 @@ export default function BudgetView({ budget }: { budget: Budget }) {
   useEffect(() => { load() }, [load])
 
   const current = tabs.find(t => t.key === tab)!
+  const plan = useMemo(() => effectivePlan(entries, month), [entries, month])
   const planOpts: Opt[] = useMemo(() => {
     const order = (g: string) => { const i = DEFAULT_GROUPS.indexOf(g); return i < 0 ? 99 : i }
     const seen = new Set<string>()
-    return entries.filter(e => e.section === 'plan' && e.kind === 'expense')
+    return plan.lines.filter(e => e.kind === 'expense')
       .map(e => ({ group: e.grp || 'Other', name: e.category }))
       .filter(o => !seen.has(o.group + '|' + o.name) && seen.add(o.group + '|' + o.name))
       .sort((a, b) => order(a.group) - order(b.group) || a.group.localeCompare(b.group) || a.name.localeCompare(b.name))
-  }, [entries])
+  }, [plan])
+
+  async function copyPlan() {
+    const rows = plan.lines.map(e => ({ budget_id: budget.id, section: 'plan', kind: e.kind, grp: e.grp, category: e.category, description: e.description, amount: e.amount, entry_date: `${month}-01` }))
+    const { error } = await supabase.from('entries').insert(rows)
+    if (error) setError(error.message); else await load()
+  }
 
   return (
     <div>
@@ -76,10 +84,11 @@ export default function BudgetView({ budget }: { budget: Budget }) {
       {error && <p className="error">{error}</p>}
       {current.section
         ? <EntryList budgetId={budget.id} section={current.section} config={configFor(current.section, kid)}
-            entries={entries.filter(e => e.section === current.section)} month={month} setMonth={setMonth} reload={load}
+            entries={current.section === 'plan' ? plan.lines : entries.filter(e => e.section === current.section)} month={month} setMonth={setMonth} reload={load}
+            planFrom={current.section === 'plan' ? plan.from : undefined} onCopyPlan={copyPlan}
             planOpts={current.section === 'daily' && planOpts.length ? planOpts : undefined} />
         : kid ? <KidOverview entries={entries} month={month} setMonth={setMonth} />
-              : <AdultOverview entries={entries} month={month} setMonth={setMonth} />}
+              : <AdultOverview entries={entries} plan={plan} month={month} setMonth={setMonth} />}
     </div>
   )
 }
@@ -89,16 +98,24 @@ function savingsBalance(list: Entry[]) {
   return list.filter(e => e.section === 'savings').reduce((s, e) => s + (e.kind === 'withdrawal' ? -e.amount : e.amount), 0)
 }
 
-function MonthPicker({ month, setMonth }: { month: string; setMonth: (m: string) => void }) {
-  return <label className="inline">Month <input type="month" value={month} onChange={e => setMonth(e.target.value || thisMonth())} /></label>
+// Each month has its own budget lines (dated the 1st of that month). A month without
+// its own lines uses the most recent earlier month's budget until it is copied.
+export interface PlanView { lines: Entry[]; from: string | null; own: boolean }
+function effectivePlan(entries: Entry[], month: string): PlanView {
+  const all = entries.filter(e => e.section === 'plan')
+  const own = all.filter(e => e.entry_date.startsWith(month))
+  if (own.length) return { lines: own, from: month, own: true }
+  const earlier = [...new Set(all.map(e => e.entry_date.slice(0, 7)))].filter(m => m < month).sort()
+  const from = earlier.length ? earlier[earlier.length - 1] : null
+  return { lines: from ? all.filter(e => e.entry_date.startsWith(from)) : [], from, own: false }
 }
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: 'good' | 'bad' }) {
   return <div className={`stat ${tone ?? ''}`}><div className="muted small">{label}</div><div className="big">{money(value)}</div></div>
 }
 
-function AdultOverview({ entries, month, setMonth }: { entries: Entry[]; month: string; setMonth: (m: string) => void }) {
-  const plan = entries.filter(e => e.section === 'plan')
+function AdultOverview({ entries, plan: pv, month, setMonth }: { entries: Entry[]; plan: PlanView; month: string; setMonth: (m: string) => void }) {
+  const plan = pv.lines
   const plannedIncome = sum(plan.filter(e => e.kind === 'income'))
   const plannedExpense = sum(plan.filter(e => e.kind === 'expense'))
   const spent = entries.filter(e => e.section === 'daily' && e.entry_date.startsWith(month))
@@ -126,11 +143,12 @@ function AdultOverview({ entries, month, setMonth }: { entries: Entry[]; month: 
 
   return (
     <div>
-      <div className="row between"><h2>This month at a glance</h2><MonthPicker month={month} setMonth={setMonth} /></div>
+      <div className="row between"><h2>Month at a glance</h2><MonthNav month={month} setMonth={setMonth} /></div>
+      {!pv.own && <p className="muted small">{pv.from ? `No budget set for ${monthName(month)} yet, so this uses ${monthName(pv.from)}'s budget.` : `No budget set for ${monthName(month)}.`}</p>}
       <div className="stats">
         <Stat label="Planned income" value={plannedIncome} />
         <Stat label="Planned expenses" value={plannedExpense} />
-        <Stat label="Spent this month" value={spentTotal} />
+        <Stat label="Spent" value={spentTotal} />
         <Stat label="Left of budget" value={plannedExpense - spentTotal} tone={plannedExpense - spentTotal < 0 ? 'bad' : 'good'} />
         <Stat label="Planned surplus" value={plannedIncome - plannedExpense} tone={plannedIncome - plannedExpense < 0 ? 'bad' : 'good'} />
       </div>
@@ -172,7 +190,7 @@ function KidOverview({ entries, month, setMonth }: { entries: Entry[]; month: st
   const savings = savingsBalance(entries)
   return (
     <div>
-      <div className="row between"><h2>This month</h2><MonthPicker month={month} setMonth={setMonth} /></div>
+      <div className="row between"><h2>Month</h2><MonthNav month={month} setMonth={setMonth} /></div>
       <div className="stats">
         <Stat label="Income" value={income} />
         <Stat label="Expenses" value={expense} />

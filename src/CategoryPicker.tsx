@@ -18,18 +18,21 @@ export default function CategoryPicker({ value, options, onChange, placeholder, 
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [hi, setHi] = useState(0)
+  const [adding, setAdding] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
+    if (adding) return []
     if (!q) return options
     const hits = options.filter(o => o.name.toLowerCase().includes(q) || o.group.toLowerCase().includes(q))
     return [...hits].sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)))
-  }, [options, query])
+  }, [options, query, adding])
 
   const exact = options.some(o => o.name.toLowerCase() === query.trim().toLowerCase())
-  const showNew = query.trim() !== '' && !exact
+  const showNew = query.trim() !== '' && (adding || !exact)
   const items: (Opt & { isNew?: boolean })[] = showNew
     ? [...filtered, { group: newGroup ?? value.group, name: query.trim(), isNew: true }]
     : filtered
@@ -49,19 +52,21 @@ export default function CategoryPicker({ value, options, onChange, placeholder, 
   }, [hi, open])
 
   const label = (o: Opt) => dupNames.has(o.name) && o.group ? `${o.name} (${o.group})` : o.name
-  function close() { setOpen(false); setQuery('') }
-  function openList() { setOpen(true); setQuery(''); setHi(Math.max(0, options.findIndex(o => key(o) === key(value)))) }
+  function close() { setOpen(false); setQuery(''); setAdding(false) }
+  function startAdding() { setAdding(true); setQuery(''); setHi(0); setOpen(true); inputRef.current?.focus() }
+  function openList() { setOpen(true); setQuery(''); setAdding(false); setHi(Math.max(0, options.findIndex(o => key(o) === key(value)))) }
   function pick(o: Opt) { onChange({ group: o.group, name: o.name }); close() }
   const shownValue = value.name ? label(value) : ''
 
   return (
     <div className="picker" ref={wrap}>
       <input
+        ref={inputRef}
         role="combobox"
         aria-expanded={open}
         value={open ? query : shownValue}
-        placeholder={open ? (shownValue || `Search ${noun}…`) : (placeholder ?? 'Choose…')}
-        onFocus={openList}
+        placeholder={adding ? `Type the new ${noun} name, then Enter` : open ? (shownValue || `Search ${noun}…`) : (placeholder ?? 'Choose…')}
+        onFocus={() => { if (!open) openList() }}
         onClick={() => { if (!open) openList() }}
         onChange={e => {
           const v = e.target.value
@@ -79,7 +84,7 @@ export default function CategoryPicker({ value, options, onChange, placeholder, 
       <span className="caret" aria-hidden>▾</span>
       {open && (
         <ul className="picker-list" role="listbox" ref={listRef}>
-          {items.length === 0 && <li className="muted empty">Nothing found</li>}
+          {items.length === 0 && <li className="muted empty">{adding ? `Type a name for the new ${noun} above` : 'Nothing found'}</li>}
           {items.map((it, i) => {
             const head = grouped && it.group && (i === 0 || items[i - 1].group !== it.group)
             const sel = !it.isNew && key(it) === key(value)
@@ -95,6 +100,9 @@ export default function CategoryPicker({ value, options, onChange, placeholder, 
               </li>,
             ]
           })}
+          {!adding && (
+            <li className="add-new" onMouseDown={e => { e.preventDefault(); startAdding() }}>＋ Add new {noun}</li>
+          )}
         </ul>
       )}
     </div>

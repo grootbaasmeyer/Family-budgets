@@ -80,3 +80,11 @@ button.chip.on { border-color: var(--accent); background: var(--accent); color: 
 tr.group-row td { background: var(--soft); font-weight: 600; }
 tr.group-row td.num { font-variant-numeric: tabular-nums; }
 .indent-cell { padding-left: 24px; }
+.picker-list li.add-new { position: sticky; bottom: -4px; margin: 4px -4px -4px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; background: var(--card); color: var(--accent); font-weight: 600; }
+.picker-list li.add-new:hover { background: var(--soft); }
+.monthnav { display: inline-flex; align-items: center; gap: 4px; }
+.monthnav button { padding: 6px 10px; background: transparent; color: var(--ink); border-color: var(--line); }
+.monthnav .mlabel { min-width: 130px; text-align: center; font-weight: 600; position: relative; }
+.monthnav .mlabel input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.monthnav .today { font-size: .8rem; }
+.banner { background: var(--soft); border-radius: 10px; padding: 12px 14px; margin: 12px 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
