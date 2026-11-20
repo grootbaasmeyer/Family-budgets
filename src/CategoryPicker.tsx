@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+export interface Opt { group: string; name: string }
+const key = (o: Opt) => `${o.group}|${o.name}`
+
 interface Props {
-  value: string
-  options: string[]
-  onChange: (v: string) => void
+  value: Opt
+  options: Opt[]
+  onChange: (v: Opt) => void
   placeholder?: string
+  newGroup?: string          // group given to a newly typed category
+  noun?: string              // "category" or "group"
 }
 
-// Pick-list with type-to-search. Shows every category when opened; typing filters.
-// A name that isn't in the list can still be used as a new category.
-export default function CategoryPicker({ value, options, onChange, placeholder }: Props) {
+// Pick-list with type-to-search. Opens with the full list (grouped under headings when
+// options carry a group); typing filters on name or group. Unknown names can be added.
+export default function CategoryPicker({ value, options, onChange, placeholder, newGroup, noun = 'category' }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [hi, setHi] = useState(0)
@@ -18,45 +23,49 @@ export default function CategoryPicker({ value, options, onChange, placeholder }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = q ? options.filter(o => o.toLowerCase().includes(q)) : options
-    return [...list].sort((a, b) => {
-      if (!q) return 0
-      return Number(!a.toLowerCase().startsWith(q)) - Number(!b.toLowerCase().startsWith(q))
-    })
+    if (!q) return options
+    const hits = options.filter(o => o.name.toLowerCase().includes(q) || o.group.toLowerCase().includes(q))
+    return [...hits].sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)))
   }, [options, query])
 
-  const exact = options.some(o => o.toLowerCase() === query.trim().toLowerCase())
+  const exact = options.some(o => o.name.toLowerCase() === query.trim().toLowerCase())
   const showNew = query.trim() !== '' && !exact
-  const items = showNew ? [...filtered, `__new__${query.trim()}`] : filtered
+  const items: (Opt & { isNew?: boolean })[] = showNew
+    ? [...filtered, { group: newGroup ?? value.group, name: query.trim(), isNew: true }]
+    : filtered
+  const grouped = !query.trim() && options.some(o => o.group)
+  const dupNames = useMemo(() => {
+    const c = new Map<string, number>(); options.forEach(o => c.set(o.name, (c.get(o.name) ?? 0) + 1))
+    return new Set([...c].filter(([, n]) => n > 1).map(([n]) => n))
+  }, [options])
 
   useEffect(() => {
     function onDoc(e: MouseEvent) { if (wrap.current && !wrap.current.contains(e.target as Node)) close() }
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   })
-
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-i="${hi}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [hi, open])
 
+  const label = (o: Opt) => dupNames.has(o.name) && o.group ? `${o.name} (${o.group})` : o.name
   function close() { setOpen(false); setQuery('') }
-  function pick(item: string) {
-    onChange(item.startsWith('__new__') ? item.slice(7) : item)
-    close()
-  }
+  function openList() { setOpen(true); setQuery(''); setHi(Math.max(0, options.findIndex(o => key(o) === key(value)))) }
+  function pick(o: Opt) { onChange({ group: o.group, name: o.name }); close() }
+  const shownValue = value.name ? label(value) : ''
 
   return (
     <div className="picker" ref={wrap}>
       <input
         role="combobox"
         aria-expanded={open}
-        value={open ? query : value}
-        placeholder={open ? (value || 'Search categories…') : (placeholder ?? 'Choose…')}
-        onFocus={() => { setOpen(true); setQuery(''); setHi(Math.max(0, options.indexOf(value))) }}
-        onClick={() => { if (!open) { setOpen(true); setQuery(''); setHi(Math.max(0, options.indexOf(value))) } }}
+        value={open ? query : shownValue}
+        placeholder={open ? (shownValue || `Search ${noun}…`) : (placeholder ?? 'Choose…')}
+        onFocus={openList}
+        onClick={() => { if (!open) openList() }}
         onChange={e => {
           const v = e.target.value
-          setQuery(open ? v : v.startsWith(value) ? v.slice(value.length) : v)
+          setQuery(open ? v : v.startsWith(shownValue) ? v.slice(shownValue.length) : v)
           setHi(0); setOpen(true)
         }}
         onKeyDown={e => {
@@ -70,16 +79,22 @@ export default function CategoryPicker({ value, options, onChange, placeholder }
       <span className="caret" aria-hidden>▾</span>
       {open && (
         <ul className="picker-list" role="listbox" ref={listRef}>
-          {items.length === 0 && <li className="muted empty">No categories</li>}
-          {items.map((it, i) => (
-            <li key={it} data-i={i} role="option" aria-selected={i === hi}
-              className={`${i === hi ? 'hi' : ''} ${it === value ? 'sel' : ''}`}
-              onMouseEnter={() => setHi(i)}
-              onMouseDown={e => { e.preventDefault(); pick(it) }}>
-              {it.startsWith('__new__') ? <>Add new category “<b>{it.slice(7)}</b>”</> : it}
-              {it === value && <span className="tick">✓</span>}
-            </li>
-          ))}
+          {items.length === 0 && <li className="muted empty">Nothing found</li>}
+          {items.map((it, i) => {
+            const head = grouped && it.group && (i === 0 || items[i - 1].group !== it.group)
+            const sel = !it.isNew && key(it) === key(value)
+            return [
+              head ? <li key={`h-${it.group}`} className="group-head" aria-hidden>{it.group}</li> : null,
+              <li key={key(it) + (it.isNew ? '-new' : '')} data-i={i} role="option" aria-selected={i === hi}
+                className={`${i === hi ? 'hi' : ''} ${sel ? 'sel' : ''} ${grouped && it.group ? 'indent' : ''}`}
+                onMouseEnter={() => setHi(i)}
+                onMouseDown={e => { e.preventDefault(); pick(it) }}>
+                <span>{it.isNew ? <>Add new {noun} “<b>{it.name}</b>”</> : it.name}
+                  {!grouped && it.group && !it.isNew && <span className="muted small-inline"> · {it.group}</span>}</span>
+                {sel && <span className="tick">✓</span>}
+              </li>,
+            ]
+          })}
         </ul>
       )}
     </div>

@@ -30,6 +30,7 @@ export interface Entry {
   budget_id: string
   section: Section
   kind: Kind
+  grp: string
   category: string
   description: string
   amount: number

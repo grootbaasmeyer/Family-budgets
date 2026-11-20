@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, money, thisMonth, type Budget, type Entry, type Section } from './supabase'
-import EntryList, { type ListConfig } from './EntryList'
+import EntryList, { DEFAULT_GROUPS, type ListConfig } from './EntryList'
+import type { Opt } from './CategoryPicker'
 
 const EXPENSE_CATS = ['Groceries', 'Housing', 'Transport', 'Fuel', 'Utilities', 'Insurance', 'Medical', 'School', 'Entertainment', 'Eating out', 'Clothing', 'Subscriptions', 'Debt', 'Gifts', 'Other']
 const INCOME_CATS = ['Salary', 'Business', 'Interest', 'Other income']
@@ -28,7 +29,7 @@ const KID_TABS: Tab[] = [
 
 function configFor(section: Section, kid: boolean): ListConfig {
   switch (section) {
-    case 'plan': return { title: 'Monthly budget', hint: 'Your planned income and expenses for a normal month.', kinds: ['expense', 'income'], categories: { expense: EXPENSE_CATS, income: INCOME_CATS }, showDate: false, monthFilter: false }
+    case 'plan': return { title: 'Monthly budget', hint: 'Your planned income and expenses for a normal month.', kinds: ['expense', 'income'], categories: { expense: EXPENSE_CATS, income: INCOME_CATS }, showDate: false, monthFilter: false, grouped: true }
     case 'daily': return { title: 'Daily spending', hint: 'Log what you actually spend. It is compared with the monthly budget.', categories: { _: EXPENSE_CATS }, showDate: true, monthFilter: true }
     case 'asset': return { title: 'Assets', hint: 'What you own and its current value.', categories: { _: ASSET_CATS }, showDate: true, monthFilter: false, amountLabel: 'Value', dateLabel: 'Valued on' }
     case 'savings': return kid
@@ -57,6 +58,14 @@ export default function BudgetView({ budget }: { budget: Budget }) {
   useEffect(() => { load() }, [load])
 
   const current = tabs.find(t => t.key === tab)!
+  const planOpts: Opt[] = useMemo(() => {
+    const order = (g: string) => { const i = DEFAULT_GROUPS.indexOf(g); return i < 0 ? 99 : i }
+    const seen = new Set<string>()
+    return entries.filter(e => e.section === 'plan' && e.kind === 'expense')
+      .map(e => ({ group: e.grp || 'Other', name: e.category }))
+      .filter(o => !seen.has(o.group + '|' + o.name) && seen.add(o.group + '|' + o.name))
+      .sort((a, b) => order(a.group) - order(b.group) || a.group.localeCompare(b.group) || a.name.localeCompare(b.name))
+  }, [entries])
 
   return (
     <div>
@@ -67,7 +76,8 @@ export default function BudgetView({ budget }: { budget: Budget }) {
       {error && <p className="error">{error}</p>}
       {current.section
         ? <EntryList budgetId={budget.id} section={current.section} config={configFor(current.section, kid)}
-            entries={entries.filter(e => e.section === current.section)} month={month} setMonth={setMonth} reload={load} />
+            entries={entries.filter(e => e.section === current.section)} month={month} setMonth={setMonth} reload={load}
+            planOpts={current.section === 'daily' && planOpts.length ? planOpts : undefined} />
         : kid ? <KidOverview entries={entries} month={month} setMonth={setMonth} />
               : <AdultOverview entries={entries} month={month} setMonth={setMonth} />}
     </div>
@@ -97,10 +107,21 @@ function AdultOverview({ entries, month, setMonth }: { entries: Entry[]; month: 
   const savings = savingsBalance(entries)
 
   const rows = useMemo(() => {
-    const cats = new Map<string, { planned: number; actual: number }>()
-    plan.filter(e => e.kind === 'expense').forEach(e => { const r = cats.get(e.category) ?? { planned: 0, actual: 0 }; r.planned += e.amount; cats.set(e.category, r) })
-    spent.forEach(e => { const r = cats.get(e.category) ?? { planned: 0, actual: 0 }; r.actual += e.amount; cats.set(e.category, r) })
-    return [...cats.entries()].sort((a, b) => b[1].planned - a[1].planned)
+    const order = (g: string) => { const i = DEFAULT_GROUPS.indexOf(g); return i < 0 ? 99 : i }
+    const cats = new Map<string, { group: string; cat: string; planned: number; actual: number }>()
+    const get = (g: string, c: string) => { const kk = g + '|' + c; let r = cats.get(kk); if (!r) { r = { group: g, cat: c, planned: 0, actual: 0 }; cats.set(kk, r) } return r }
+    plan.filter(e => e.kind === 'expense').forEach(e => { get(e.grp || 'Other', e.category).planned += e.amount })
+    spent.forEach(e => { get(e.grp || 'Other', e.category).actual += e.amount })
+    const list = [...cats.values()].sort((a, b) => order(a.group) - order(b.group) || a.group.localeCompare(b.group) || b.planned - a.planned)
+    const out: { head?: string; group: string; cat: string; planned: number; actual: number }[] = []
+    list.forEach((r, i) => {
+      if (i === 0 || list[i - 1].group !== r.group) {
+        const g = list.filter(x => x.group === r.group)
+        out.push({ head: r.group, group: r.group, cat: '', planned: g.reduce((t, x) => t + x.planned, 0), actual: g.reduce((t, x) => t + x.actual, 0) })
+      }
+      out.push(r)
+    })
+    return out
   }, [plan, spent])
 
   return (
@@ -118,12 +139,15 @@ function AdultOverview({ entries, month, setMonth }: { entries: Entry[]; month: 
         <div className="card table-wrap">
           <table>
             <thead><tr><th>Category</th><th className="num">Budget</th><th className="num">Spent</th><th className="num">Left</th><th></th></tr></thead>
-            <tbody>{rows.map(([cat, r]) => {
-              const pct = r.planned ? Math.min(100, (r.actual / r.planned) * 100) : 100
+            <tbody>{rows.map(r => {
+              const pct = r.planned ? Math.min(100, (r.actual / r.planned) * 100) : r.actual ? 100 : 0
               const over = r.actual > r.planned
-              return <tr key={cat}><td>{cat}</td><td className="num">{money(r.planned)}</td><td className="num">{money(r.actual)}</td>
-                <td className={`num ${over ? 'neg' : ''}`}>{money(r.planned - r.actual)}</td>
-                <td className="barcell"><div className="bar"><div className={over ? 'fill over' : 'fill'} style={{ width: `${pct}%` }} /></div></td></tr>
+              const bar = <td className="barcell"><div className="bar"><div className={over ? 'fill over' : 'fill'} style={{ width: `${pct}%` }} /></div></td>
+              return r.head
+                ? <tr key={'h' + r.head} className="group-row"><td>{r.head}</td><td className="num">{money(r.planned)}</td><td className="num">{money(r.actual)}</td>
+                    <td className={`num ${over ? 'neg' : ''}`}>{money(r.planned - r.actual)}</td>{bar}</tr>
+                : <tr key={r.group + '|' + r.cat}><td className="indent-cell">{r.cat}</td><td className="num">{money(r.planned)}</td><td className="num">{money(r.actual)}</td>
+                    <td className={`num ${over ? 'neg' : ''}`}>{money(r.planned - r.actual)}</td>{bar}</tr>
             })}</tbody>
           </table>
         </div>
