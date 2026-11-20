@@ -1,9 +1,9 @@
 -- Fill in the real email addresses, then run.
 insert into public.allowed_members (email, display_name, role, budget_slug) values
-  ('JP_SNR_EMAIL',  'JP snr', 'parent', 'jp-snr'),
-  ('MADINE_EMAIL',  'Madine', 'parent', 'madine'),
-  ('MIANE_EMAIL',   'Miané',  'child',  'miane'),
-  ('JP_JNR_EMAIL',  'JP jnr', 'child',  'jp-jnr')
+  ('grootbaasmeyer@gmail.com',  'JP snr', 'parent', 'jp-snr'),
+  ('madinevheerden@hotmail.com',  'Madine', 'parent', 'madine'),
+  ('mianemeyer11@gmail.com',   'Miané',  'child',  'miane'),
+  ('meyerjp13@gmail.com',  'JP jnr', 'child',  'jp-jnr')
 on conflict (email) do update set display_name = excluded.display_name,
   role = excluded.role, budget_slug = excluded.budget_slug;
 
